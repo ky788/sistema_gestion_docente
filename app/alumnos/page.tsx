@@ -6,9 +6,16 @@ import { supabase } from '@/app/lib/supabase';
 export default function AlumnosPage() {
   const [alumnos, setAlumnos] = useState<any[]>([]);
   const [asistencias, setAsistencias] = useState<any[]>([]);
+  const [tps, setTps] = useState<any[]>([]); // Nuevo estado para TPs
   const [nombre, setNombre] = useState('');
   const [apellido, setApellido] = useState('');
   const [curso, setCurso] = useState('');
+
+  // Lógica para el mes actual
+  const hoy = new Date();
+  const primerDiaMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+  const mesActualStr = primerDiaMes.toISOString().split('T')[0];
+  const nombreMesActual = hoy.toLocaleString('es-ES', { month: 'long' });
   const [loading, setLoading] = useState(true);
 
   // Estado para filtrado por curso
@@ -34,6 +41,12 @@ export default function AlumnosPage() {
 
       const { data: asisData } = await supabase.from('asistencia').select('*');
       if (asisData) setAsistencias(asisData);
+
+      const { data: tpData } = await supabase
+        .from('trabajos_practicos')
+        .select('*')
+        .eq('mes', mesActualStr);
+      if (tpData) setTps(tpData);
     } catch (error) {
       console.error('Error obteniendo alumnos:', error);
     } finally {
@@ -116,6 +129,39 @@ export default function AlumnosPage() {
     } catch (error) {
       console.error('Error eliminando alumno:', error);
       alert('Error al eliminar. Asegúrate de tener permisos de DELETE en RLS.');
+    }
+  }
+
+  async function handleToggleTP(alumnoId: string, campo: 'tp1' | 'tp2', valorActual: boolean) {
+    const nuevoValor = !valorActual;
+    const registroActual = tps.find(t => t.alumno_id === alumnoId && t.mes === mesActualStr) || {};
+
+    try {
+      const { data, error } = await supabase
+        .from('trabajos_practicos')
+        .upsert({ 
+          ...registroActual,
+          alumno_id: alumnoId, 
+          mes: mesActualStr, 
+          [campo]: nuevoValor 
+        }, { onConflict: 'alumno_id, mes' })
+        .select();
+
+      if (error) throw error;
+
+      if (data) {
+        setTps(prev => {
+          const existe = prev.some(t => t.alumno_id === alumnoId && t.mes === mesActualStr);
+          if (existe) {
+            return prev.map(t => (t.alumno_id === alumnoId && t.mes === mesActualStr) ? data[0] : t);
+          } else {
+            return [...prev, data[0]];
+          }
+        });
+      }
+    } catch (error) {
+      console.error('Error actualizando TP:', error);
+      alert('Error al actualizar el Trabajo Práctico. Asegúrate de haber creado la tabla "trabajos_practicos" en Supabase.');
     }
   }
 
@@ -245,10 +291,11 @@ export default function AlumnosPage() {
                 <tr className="border-b-2 border-gray-100">
                   <th className="py-3 px-4 font-semibold text-gray-600 uppercase text-xs">Nombre</th>
                   <th className="py-3 px-4 font-semibold text-gray-600 uppercase text-xs">Apellido</th>
+                  <th className="py-3 px-4 font-semibold text-gray-600 uppercase text-xs text-center bg-blue-50/50">TPs ({nombreMesActual})</th>
                   <th className="py-3 px-4 font-semibold text-gray-600 uppercase text-xs">Curso</th>
+                  <th className="py-3 px-4 font-semibold text-gray-600 uppercase text-xs text-center">Asistencia</th>
                   <th className="py-3 px-4 font-semibold text-gray-600 uppercase text-xs">Notas Actuales</th>
                   <th className="py-3 px-4 font-semibold text-gray-600 uppercase text-xs">Promedio</th>
-                  <th className="py-3 px-4 font-semibold text-gray-600 uppercase text-xs">Asistencia</th>
                   <th className="py-3 px-4 font-semibold text-gray-600 uppercase text-xs">Agregar Nota</th>
                   <th className="py-3 px-4 font-semibold text-gray-600 uppercase text-xs text-center">Acciones</th>
                 </tr>
@@ -258,26 +305,47 @@ export default function AlumnosPage() {
                   <tr key={alumno.id} className="hover:bg-gray-50 transition">
                     <td className="py-4 px-4 text-gray-800 font-medium">{alumno.nombre}</td>
                     <td className="py-4 px-4 text-gray-800">{alumno.apellido}</td>
-                    <td className="py-4 px-4 text-gray-600">
+                    <td className="py-4 px-4 text-center align-middle bg-blue-50/30">
+                      {(() => {
+                        const tpInfo = tps.find(t => t.alumno_id === alumno.id && t.mes === mesActualStr) || { tp1: false, tp2: false };
+                        return (
+                          <div className="flex flex-col items-center justify-center gap-1.5 min-w-[6rem]">
+                            <button 
+                              onClick={() => handleToggleTP(alumno.id, 'tp1', tpInfo.tp1)}
+                              className={`text-[10px] w-full font-bold px-2 py-1 rounded transition border shadow-sm ${tpInfo.tp1 ? 'bg-green-500 border-green-600 text-white' : 'bg-white border-gray-200 text-gray-400 hover:bg-gray-50'}`}
+                            >
+                              TP 1: {tpInfo.tp1 ? '✔' : '✖'}
+                            </button>
+                            <button 
+                              onClick={() => handleToggleTP(alumno.id, 'tp2', tpInfo.tp2)}
+                              className={`text-[10px] w-full font-bold px-2 py-1 rounded transition border shadow-sm ${tpInfo.tp2 ? 'bg-green-500 border-green-600 text-white' : 'bg-white border-gray-200 text-gray-400 hover:bg-gray-50'}`}
+                            >
+                              TP 2: {tpInfo.tp2 ? '✔' : '✖'}
+                            </button>
+                          </div>
+                        );
+                      })()}
+                    </td>
+                    <td className="py-4 px-4 text-gray-600 text-center">
                       <span className="bg-blue-100 text-blue-800 text-xs px-2.5 py-0.5 rounded-full font-medium">
                         {alumno.curso}
                       </span>
                     </td>
+                    <td className="py-4 px-4 text-sm whitespace-nowrap text-center">
+                      <div className="flex flex-col">
+                        <span className="text-green-600 font-medium">Pres: {asistencias.filter(a => a.alumno_id === alumno.id && a.presente === true).length}</span>
+                        <span className="text-red-500 font-medium">Aus: {asistencias.filter(a => a.alumno_id === alumno.id && a.presente === false).length}</span>
+                      </div>
+                    </td>
                     <td className="py-4 px-4 text-gray-800 font-semibold text-sm">
                       {alumno.notas && alumno.notas.length > 0
                         ? alumno.notas.join(' - ')
-                        : <span className="text-gray-400 italic">Sin notas</span>}
+                        : <span className="text-gray-400 italic font-normal">Sin notas</span>}
                     </td>
                     <td className="py-4 px-4 text-blue-700 font-bold text-sm">
                       {alumno.notas && alumno.notas.length > 0
                         ? (alumno.notas.reduce((a: number, b: number) => a + b, 0) / alumno.notas.length).toFixed(1)
                         : <span className="text-gray-400 italic font-normal">Sin promedio</span>}
-                    </td>
-                    <td className="py-4 px-4 text-sm whitespace-nowrap">
-                      <div className="flex flex-col">
-                        <span className="text-green-600 font-medium">Asistencias: {asistencias.filter(a => a.alumno_id === alumno.id && a.presente === true).length}</span>
-                        <span className="text-red-500 font-medium">Inasistencias: {asistencias.filter(a => a.alumno_id === alumno.id && a.presente === false).length}</span>
-                      </div>
                     </td>
                     <td className="py-4 px-4">
                       <div className="flex gap-2 items-center">
