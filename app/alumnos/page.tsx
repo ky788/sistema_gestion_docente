@@ -38,6 +38,7 @@ export default function AlumnosPage() {
   const [evalEscrita, setEvalEscrita] = useState({ nota: '', fecha: '' });
   const [evalCarpeta, setEvalCarpeta] = useState({ nota: '', fecha: '' });
   const [mensajePadres, setMensajePadres] = useState('');
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
 
   const nombreMesSeleccionado = MESES.find(m => m.valor === mesSeleccionado)?.nombre || 'Mes';
 
@@ -162,6 +163,35 @@ export default function AlumnosPage() {
     setEvalEscrita({ nota: '', fecha: '' });
     setEvalCarpeta({ nota: '', fecha: '' });
     setMensajePadres('');
+  };
+
+  const handleSendEmail = async () => {
+    if (!alumnoModal) return;
+    setIsSendingEmail(true);
+    try {
+      const response = await fetch('/api/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nombre: alumnoModal.nombre,
+          apellido: alumnoModal.apellido,
+          curso: alumnoModal.curso,
+          mensaje: mensajePadres,
+          evalOral,
+          evalEscrita,
+          evalCarpeta
+        }),
+      });
+
+      if (!response.ok) throw new Error('Error al enviar el correo');
+      
+      alert(`✅ Notificación enviada con éxito para ${alumnoModal.nombre}`);
+    } catch (error) {
+      console.error(error);
+      alert('❌ Hubo un problema al enviar la notificación. Verifica tu API Key de Resend en .env.local');
+    } finally {
+      setIsSendingEmail(false);
+    }
   };
 
   return (
@@ -407,13 +437,26 @@ export default function AlumnosPage() {
 
               {/* Botón de Envío Compacto */}
               <button 
-                className="w-full bg-indigo-600 text-white font-bold py-3.5 rounded-xl shadow-md hover:bg-indigo-700 active:scale-[0.99] transition-all flex items-center justify-center gap-2 text-base group"
-                onClick={() => alert(`Enviando notificación para ${alumnoModal.nombre}`)}
+                className={`w-full font-bold py-3.5 rounded-xl shadow-md active:scale-[0.99] transition-all flex items-center justify-center gap-2 text-base group ${isSendingEmail ? 'bg-gray-400 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
+                onClick={handleSendEmail}
+                disabled={isSendingEmail}
               >
-                <svg className="w-5 h-5 transition-transform group-hover:-rotate-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                </svg>
-                Notificar por correo
+                {isSendingEmail ? (
+                  <>
+                    <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Enviando...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5 transition-transform group-hover:-rotate-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                    Notificar por correo
+                  </>
+                )}
               </button>
             </div>
 
