@@ -2,11 +2,11 @@ import { Resend } from 'resend';
 import { NextResponse } from 'next/server';
 
 export async function POST(request: Request) {
-  const resend = new Resend(process.env.RESEND_API_KEY);
-
   if (!process.env.RESEND_API_KEY) {
     return NextResponse.json({ error: 'Resend API Key no configurada' }, { status: 500 });
   }
+
+  const resend = new Resend(process.env.RESEND_API_KEY);
 
   try {
     const { nombre, apellido, curso, mensaje, evalOral, evalEscrita, evalCarpeta } = await request.json();
