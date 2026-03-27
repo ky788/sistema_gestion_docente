@@ -13,7 +13,7 @@ export async function POST(request: Request) {
 
     const { data, error } = await resend.emails.send({
       from: 'Sistema Escolar <onboarding@resend.dev>',
-      to: ['delivered@resend.dev'], // En modo prueba de Resend, se envía aquí o al correo verificado
+      to: ['ccall8206@gmail.com'], // Dirección de prueba real
       subject: `Notificación Académica: ${nombre} ${apellido} (${curso})`,
       html: `
         <div style="font-family: sans-serif; max-width: 600px; margin: auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
