@@ -1,92 +1,316 @@
+"use client";
+
+import { useEffect, useState } from 'react';
+import { supabase } from '@/app/lib/supabase';
 import Link from 'next/link';
+import { 
+  UsersIcon, 
+  CheckBadgeIcon, 
+  BookOpenIcon, 
+  AcademicCapIcon,
+  BellIcon,
+  ChartBarIcon,
+  ArrowUpRightIcon
+} from '@heroicons/react/24/outline';
+
+const ACCESOS_RAPIDOS = [
+  { nombre: 'Alumnos', href: '/alumnos', icono: UsersIcon, color: 'text-purple-500', bg: 'bg-purple-50' },
+  { nombre: 'Asistencia', href: '/asistencia', icono: CheckBadgeIcon, color: 'text-emerald-500', bg: 'bg-emerald-50' },
+  { nombre: 'Trabajos', href: '/trabajos', icono: BookOpenIcon, color: 'text-amber-500', bg: 'bg-amber-50' },
+  { nombre: 'Calificaciones', href: '/calificaciones', icono: AcademicCapIcon, color: 'text-blue-500', bg: 'bg-blue-50' },
+];
 
 export default function Home() {
-  return (
-    <div className="min-h-screen bg-gray-50 font-sans flex flex-col">
-      <header className="bg-white shadow-sm border-b border-gray-100">
-        <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
-          <h1 className="text-3xl md:text-4xl font-extrabold text-gray-900 tracking-tight text-center">
-            Sistema de Gestión Docente
-            <span className="block text-xl md:text-2xl text-blue-600 font-semibold mt-2">Educación Tecnológica</span>
-          </h1>
-        </div>
-      </header>
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState({
+    asistenciaHoy: 0,
+    alertaRendimiento: 0,
+    faltanCerrar: 0,
+    tpProgreso: { tp1: 0, tp2: 0, tp3: 0 }
+  });
+  const [alertas, setAlertas] = useState<any[]>([]);
+
+  const fechaHoy = new Date().toLocaleDateString('es-ES', { 
+    weekday: 'long', 
+    day: 'numeric', 
+    month: 'long', 
+    year: 'numeric' 
+  });
+  const fechaFormateada = fechaHoy.charAt(0).toUpperCase() + fechaHoy.slice(1);
+
+  useEffect(() => {
+    fetchDashboardData();
+  }, []);
+
+  async function fetchDashboardData() {
+    try {
+      setLoading(true);
+      const todayISO = new Date().toISOString().split('T')[0];
+      const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+      const diaActual = new Date().getDate();
+      const semanaIdx = diaActual <= 7 ? 1 : diaActual <= 14 ? 2 : diaActual <= 21 ? 3 : 4;
+
+      // 1. Alumnos totales
+      const { count: totalAlumnos } = await supabase.from('alumnos').select('*', { count: 'exact', head: true });
+      const total = totalAlumnos || 1; // Evitar división por cero
+
+      // 2. Asistencia hoy
+      const { data: asisHoy } = await supabase.from('asistencia').select('*').eq('fecha', todayISO).eq('presente', true);
+      const presentes = asisHoy?.length || 0;
+      const pctAsistencia = Math.round((presentes / total) * 100);
+
+      // 3. Trabajos / Alertas / Progreso
+      const { data: trabajosData } = await supabase.from('trabajos_practicos').select('*').eq('mes', startOfMonth);
       
-      <main className="flex-1 max-w-6xl mx-auto py-12 px-4 sm:px-6 lg:px-8 w-full">
-        <div className="text-center mb-14">
-          <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-            Bienvenido al panel principal. Desde aquí puedes administrar todos tus cursos, registrar calificaciones y tomar la asistencia diaria de forma rápida y sencilla.
+      const bajoRendimiento = trabajosData?.filter(t => t.evaluaciones?.nota_final_mes && t.evaluaciones.nota_final_mes < 4).length || 0;
+      const cerrados = trabajosData?.filter(t => t.evaluaciones?.nota_final_mes !== undefined && t.evaluaciones.nota_final_mes !== null).length || 0;
+      const faltanCerrar = total - cerrados;
+
+      // Progreso TPs de la semana
+      let entregasTP1 = 0;
+      let entregasTP2 = 0;
+      let entregasTP3 = 0;
+
+      trabajosData?.forEach(t => {
+        const evalSem = t.evaluaciones?.[`semana${semanaIdx}`];
+        if (evalSem) {
+          if (evalSem.tp1 !== undefined && evalSem.tp1 !== null) entregasTP1++;
+          if (evalSem.tp2 !== undefined && evalSem.tp2 !== null) entregasTP2++;
+          if (evalSem.tp3 !== undefined && evalSem.tp3 !== null) entregasTP3++;
+        }
+      });
+
+      setStats({
+        asistenciaHoy: pctAsistencia,
+        alertaRendimiento: bajoRendimiento,
+        faltanCerrar: faltanCerrar,
+        tpProgreso: {
+          tp1: Math.round((entregasTP1 / total) * 100),
+          tp2: Math.round((entregasTP2 / total) * 100),
+          tp3: Math.round((entregasTP3 / total) * 100),
+        }
+      });
+
+      // Crear alertas dinámicas
+      const nuevasAlertas = [];
+      if (bajoRendimiento > 0) {
+        nuevasAlertas.push({ id: 1, mensaje: `${bajoRendimiento} alumnos con rendimiento bajo este mes`, tipo: 'urgente' });
+      }
+      if (faltanCerrar > 0) {
+        nuevasAlertas.push({ id: 2, mensaje: `Faltan cerrar ${faltanCerrar} notas finales de este mes`, tipo: 'aviso' });
+      }
+      if (pctAsistencia < 75) {
+        nuevasAlertas.push({ id: 3, mensaje: `Alerta: Asistencia baja hoy (${pctAsistencia}%)`, tipo: 'urgente' });
+      } else {
+        nuevasAlertas.push({ id: 4, mensaje: `Cierre de mes programado para los próximos días`, tipo: 'info' });
+      }
+      
+      setAlertas(nuevasAlertas);
+
+    } catch (error) {
+      console.error('Error al cargar dashboard:', error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const SkeletonWidget = () => (
+    <div className="bg-[#0a1128] rounded-[2.5rem] p-8 shadow-2xl animate-pulse">
+      <div className="flex justify-between items-start mb-8">
+        <div className="space-y-3">
+          <div className="h-2 w-24 bg-white/10 rounded-full"></div>
+          <div className="h-6 w-32 bg-white/20 rounded-full"></div>
+        </div>
+        <div className="w-12 h-12 bg-white/10 rounded-2xl"></div>
+      </div>
+      <div className="flex justify-center py-6">
+        <div className="w-32 h-32 rounded-full border-8 border-white/5 flex items-center justify-center">
+           <div className="w-20 h-4 bg-white/10 rounded-full"></div>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen bg-gray-50/50 font-sans p-4 md:p-8 lg:p-12">
+      {/* HEADER / HERO SECTION */}
+      <header className="mb-12">
+        <div className="flex flex-col gap-2">
+          <h1 className="text-3xl md:text-4xl font-black text-slate-800 tracking-tight">
+            ¡Hola, César! <span className="text-slate-400 font-medium">Bienvenido a EduTech.</span>
+          </h1>
+          <p className="text-lg md:text-xl font-bold text-slate-400">
+            Hoy es <span className="text-slate-900">{fechaFormateada}</span>
           </p>
         </div>
+      </header>
 
-        <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3">
-          
-          {/* Tarjeta: Lista de Alumnos */}
-          <Link 
-            href="/alumnos" 
-            className="group flex flex-col bg-white rounded-3xl p-8 shadow-sm hover:shadow-xl transition-all duration-300 border border-gray-100 hover:border-blue-100 hover:-translate-y-1 relative overflow-hidden"
-          >
-            <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50 rounded-bl-full -z-10 opacity-50 group-hover:scale-110 transition-transform"></div>
-            <div className="bg-blue-50 text-blue-600 rounded-2xl w-16 h-16 flex items-center justify-center mb-6 group-hover:bg-blue-600 group-hover:text-white transition-colors duration-300 z-10 shadow-sm">
-              <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-            </div>
-            <h3 className="text-xl font-bold text-gray-900 mb-3 group-hover:text-blue-600 transition-colors">📋 Panel y Calificaciones</h3>
-            <p className="text-gray-500 flex-1 leading-relaxed">
-              Consulta la estadística de tus estudiantes. Agrega notas, calcula sus promedios de forma automática y exporta planillas en Excel.
-            </p>
-            <div className="mt-6 flex items-center text-blue-600 font-semibold text-sm">
-              Acceder al panel <span className="ml-2 group-hover:translate-x-1 transition-transform">→</span>
-            </div>
-          </Link>
-
-          {/* Tarjeta: Tomar Asistencia */}
-          <Link 
-            href="/asistencia" 
-            className="group flex flex-col bg-white rounded-3xl p-8 shadow-sm hover:shadow-xl transition-all duration-300 border border-gray-100 hover:border-emerald-100 hover:-translate-y-1 relative overflow-hidden"
-          >
-            <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-bl-full -z-10 opacity-50 group-hover:scale-110 transition-transform"></div>
-            <div className="bg-emerald-50 text-emerald-600 rounded-2xl w-16 h-16 flex items-center justify-center mb-6 group-hover:bg-emerald-600 group-hover:text-white transition-colors duration-300 z-10 shadow-sm">
-              <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-              </svg>
-            </div>
-            <h3 className="text-xl font-bold text-gray-900 mb-3 group-hover:text-emerald-600 transition-colors">✅ Tomar Asistencia</h3>
-            <p className="text-gray-500 flex-1 leading-relaxed">
-              Registra el estado de "presente" o "ausente" de la jornada escolar filtrando los alumnos de un curso en particular.
-            </p>
-            <div className="mt-6 flex items-center text-emerald-600 font-semibold text-sm">
-              Tomar lista hoy <span className="ml-2 group-hover:translate-x-1 transition-transform">→</span>
-            </div>
-          </Link>
-
-          {/* Tarjeta: Registrar Nuevo Alumno */}
-          <Link 
-            href="/alumnos" 
-            className="group flex flex-col bg-white rounded-3xl p-8 shadow-sm hover:shadow-xl transition-all duration-300 border border-gray-100 hover:border-purple-100 hover:-translate-y-1 relative overflow-hidden"
-          >
-            <div className="absolute top-0 right-0 w-32 h-32 bg-purple-50 rounded-bl-full -z-10 opacity-50 group-hover:scale-110 transition-transform"></div>
-            <div className="bg-purple-50 text-purple-600 rounded-2xl w-16 h-16 flex items-center justify-center mb-6 group-hover:bg-purple-600 group-hover:text-white transition-colors duration-300 z-10 shadow-sm">
-              <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
-              </svg>
-            </div>
-            <h3 className="text-xl font-bold text-gray-900 mb-3 group-hover:text-purple-600 transition-colors">➕ Registro Rápido</h3>
-            <p className="text-gray-500 flex-1 leading-relaxed">
-              Formulario simplificado para la inscripción de un nuevo estudiante en tu ecosistema introduciendo sus datos básicos.
-            </p>
-            <div className="mt-6 flex items-center text-purple-600 font-semibold text-sm">
-              Inscribir alumno <span className="ml-2 group-hover:translate-x-1 transition-transform">→</span>
-            </div>
-          </Link>
-
+      {/* SHORTCUTS BAR */}
+      <section className="mb-12">
+        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 block ml-2">Accesos Rápidos</label>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {ACCESOS_RAPIDOS.map((item) => (
+            <Link 
+              key={item.nombre} 
+              href={item.href}
+              className="flex items-center gap-4 bg-white p-5 rounded-3xl border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group"
+            >
+              <div className={`${item.bg} ${item.color} p-3 rounded-2xl group-hover:scale-110 transition-transform`}>
+                <item.icono className="w-6 h-6" />
+              </div>
+              <span className="font-black text-slate-700 text-sm">{item.nombre}</span>
+              <ArrowUpRightIcon className="w-4 h-4 ml-auto text-slate-300 group-hover:text-slate-900 transition-colors" />
+            </Link>
+          ))}
         </div>
-      </main>
+      </section>
 
-      {/* Footer Minimalista */}
-      <footer className="mt-auto py-8 text-center text-gray-400 text-sm border-t border-gray-100 bg-white">
-        <p>Desarrollado con Next.js + Tailwind CSS. Gestión Educativa © {new Date().getFullYear()}</p>
+      {/* GRID DE WIDGETS */}
+      <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+        
+        {loading ? (
+          <>
+            <SkeletonWidget />
+            <SkeletonWidget />
+            <SkeletonWidget />
+          </>
+        ) : (
+          <>
+            {/* WIDGET 1: ASISTENCIA (DONUT) */}
+            <div className="bg-[#0a1128] rounded-[2.5rem] p-8 shadow-2xl text-white relative overflow-hidden group">
+              <div className="flex justify-between items-start mb-8">
+                <div>
+                  <h3 className="text-lg font-black tracking-tight text-white mb-1 uppercase text-xs opacity-60">Asistencia Diaria</h3>
+                  <p className="text-2xl font-black text-emerald-400">{stats.asistenciaHoy}% <span className="text-xs text-white/40 ml-1 font-bold">PROMEDIO HOY</span></p>
+                </div>
+                <div className="p-3 bg-white/10 rounded-2xl">
+                  <ChartBarIcon className="w-6 h-6 text-white" />
+                </div>
+              </div>
+              
+              <div className="flex justify-center items-center py-6">
+                <div className="relative w-40 h-40">
+                  <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                    <circle
+                      className="text-white/10"
+                      strokeWidth="10"
+                      stroke="currentColor"
+                      fill="transparent"
+                      r="40"
+                      cx="50"
+                      cy="50"
+                    />
+                    <circle
+                      className="text-emerald-400 transition-all duration-1000 ease-out"
+                      strokeWidth="10"
+                      strokeDasharray={2 * Math.PI * 40}
+                      strokeDashoffset={2 * Math.PI * 40 * (1 - stats.asistenciaHoy / 100)}
+                      strokeLinecap="round"
+                      stroke="currentColor"
+                      fill="transparent"
+                      r="40"
+                      cx="50"
+                      cy="50"
+                    />
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="text-3xl font-black">{stats.asistenciaHoy}<span className="text-sm font-bold opacity-50">%</span></span>
+                    <span className="text-[10px] font-black opacity-40 uppercase tracking-widest">General</span>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-4 flex gap-2 overflow-x-auto no-scrollbar pb-2 opacity-50">
+                <span className="flex-shrink-0 px-3 py-1 bg-white/5 rounded-full text-[10px] font-black border border-white/10 italic">Carga real</span>
+                <span className="flex-shrink-0 px-3 py-1 bg-white/5 rounded-full text-[10px] font-black border border-white/10 italic">Actualizado ahora</span>
+              </div>
+            </div>
+
+            {/* WIDGET 2: ALERTAS DINÁMICAS */}
+            <div className="bg-[#0a1128] rounded-[2.5rem] p-8 shadow-2xl text-white">
+              <div className="flex justify-between items-start mb-8">
+                <div>
+                  <h3 className="text-lg font-black tracking-tight text-white mb-1 uppercase text-xs opacity-60">Alertas de Calificaciones</h3>
+                  <p className={`text-sm font-bold ${alertas.some(a => a.tipo === 'urgente') ? 'text-rose-400' : 'text-amber-400'}`}>
+                    {alertas.length > 0 ? 'Notificaciones activas' : 'Sin alertas hoy'}
+                  </p>
+                </div>
+                <div className="p-3 bg-white/10 rounded-2xl relative">
+                  <BellIcon className="w-6 h-6 text-white" />
+                  {alertas.length > 0 && <div className="absolute top-2 right-2 w-3 h-3 bg-amber-500 rounded-full border-2 border-[#0a1128]"></div>}
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                {alertas.map(alerta => (
+                  <div key={alerta.id} className="p-4 bg-white/5 rounded-2xl border border-white/5 flex gap-4 items-center group/card hover:bg-white/10 transition-colors">
+                    <div className={`w-2 h-2 rounded-full shrink-0 ${alerta.tipo === 'urgente' ? 'bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.5)]' : alerta.tipo === 'aviso' ? 'bg-amber-500' : 'bg-blue-500'}`}></div>
+                    <p className="text-xs font-bold text-white/80 group-hover/card:text-white transition-colors leading-tight">
+                      {alerta.mensaje}
+                    </p>
+                  </div>
+                ))}
+                {alertas.length === 0 && (
+                  <p className="text-center py-10 text-white/20 text-xs font-bold italic">Todo al día por ahora.</p>
+                )}
+              </div>
+            </div>
+
+            {/* WIDGET 3: ÚLTIMOS TRABAJOS (TIEMPO REAL) */}
+            <div className="bg-[#0a1128] rounded-[2.5rem] p-8 shadow-2xl text-white">
+              <div className="flex justify-between items-start mb-8">
+                <div>
+                  <h3 className="text-lg font-black tracking-tight text-white mb-1 uppercase text-xs opacity-60">Resumen de TPs</h3>
+                  <p className="text-sm font-bold text-blue-400">Semana actual</p>
+                </div>
+                <div className="p-3 bg-white/10 rounded-2xl">
+                  <BookOpenIcon className="w-6 h-6 text-white" />
+                </div>
+              </div>
+
+              <div className="space-y-6">
+                <div className="space-y-2">
+                  <div className="flex justify-between text-[11px] font-black uppercase tracking-wider">
+                    <span className="text-white/60">Trabajo Práctico 1</span>
+                    <span className="text-emerald-400">{stats.tpProgreso.tp1}%</span>
+                  </div>
+                  <div className="h-3 bg-white/10 rounded-full overflow-hidden">
+                    <div className="h-full bg-emerald-400 transition-all duration-1000 ease-out" style={{ width: `${stats.tpProgreso.tp1}%` }}></div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex justify-between text-[11px] font-black uppercase tracking-wider">
+                    <span className="text-white/60">Trabajo Práctico 2</span>
+                    <span className="text-blue-400">{stats.tpProgreso.tp2}%</span>
+                  </div>
+                  <div className="h-3 bg-white/10 rounded-full overflow-hidden">
+                    <div className="h-full bg-blue-400 transition-all duration-1000 ease-out" style={{ width: `${stats.tpProgreso.tp2}%` }}></div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex justify-between text-[11px] font-black uppercase tracking-wider">
+                    <span className="text-white/60">TP 3 / Evaluaciones</span>
+                    <span className="text-amber-400">{stats.tpProgreso.tp3}%</span>
+                  </div>
+                  <div className="h-3 bg-white/10 rounded-full overflow-hidden">
+                    <div className="h-full bg-amber-400 transition-all duration-1000 ease-out" style={{ width: `${stats.tpProgreso.tp3}%` }}></div>
+                  </div>
+                </div>
+              </div>
+              <Link href="/trabajos" className="block text-center mt-8 text-[10px] font-black uppercase tracking-widest text-white/40 hover:text-white transition-colors">
+                Ver detalle por curso →
+              </Link>
+            </div>
+          </>
+        )}
+
+      </section>
+
+      {/* FOOTER */}
+      <footer className="mt-20 py-10 border-t border-slate-100 flex flex-col items-center gap-2">
+        <p className="text-xs font-black text-slate-300 uppercase tracking-widest">Sistema de Gestión Docente v2.0</p>
+        <p className="text-[10px] font-bold text-slate-400">Conectado a Supabase Realtime</p>
       </footer>
     </div>
   );
