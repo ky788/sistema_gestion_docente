@@ -2,8 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/app/lib/supabase';
+import { useAppContext } from '@/app/context/AppContext';
+import LockScreen from '@/app/ui/LockScreen';
 
 export default function AsistenciaPage() {
+  const { escuela: ctxEscuela, curso: ctxCurso, division: ctxDivision, materia: ctxMateria, isReady } = useAppContext();
   const [alumnos, setAlumnos] = useState<any[]>([]);
   const [asistenciasDelDia, setAsistenciasDelDia] = useState<Record<string, { presente: boolean; tardanza: boolean }>>({});
   const [historialMensual, setHistorialMensual] = useState<Record<string, any[]>>({});
@@ -17,27 +20,37 @@ export default function AsistenciaPage() {
   const [alumnoSeleccionado, setAlumnoSeleccionado] = useState<any | null>(null);
 
   useEffect(() => {
+    if (!isReady || !ctxEscuela || !ctxCurso || !ctxDivision || !ctxMateria) return;
     fetchData();
-  }, [fechaFiltro]);
+  }, [fechaFiltro, ctxEscuela, ctxCurso, ctxDivision, ctxMateria, isReady]);
 
   async function fetchData() {
     try {
       setLoading(true);
+      setAlumnos([]);
+      setAsistenciasDelDia({});
+      setHistorialMensual({});
       
       // 1. Obtener Alumnos
-      const { data: alumnosData, error: alumnosError } = await supabase
-        .from('alumnos')
+      let query = supabase.from('alumnos')
         .select('*')
-        .order('apellido', { ascending: true });
+        .eq('escuela', ctxEscuela)
+        .eq('curso', ctxCurso)
+        .eq('division', ctxDivision);
+      
+      const { data: alumnosData, error: alumnosError } = await query.order('apellido', { ascending: true });
 
       if (alumnosError) throw alumnosError;
       if (alumnosData) setAlumnos(alumnosData);
 
       // 2. Obtener Asistencias del día actual
-      const { data: asistenciaData, error: asistenciaError } = await supabase
+      let asisQuery = supabase
         .from('asistencia')
         .select('*')
         .eq('fecha', fechaFiltro);
+      if (ctxMateria) asisQuery = asisQuery.eq('materia', ctxMateria);
+        
+      const { data: asistenciaData, error: asistenciaError } = await asisQuery;
 
       if (asistenciaError) throw asistenciaError;
       
@@ -51,10 +64,13 @@ export default function AsistenciaPage() {
 
       // 3. Obtener Historial del mes actual para cálculos
       const firstDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
-      const { data: historialData, error: historialError } = await supabase
+      let histQuery = supabase
         .from('asistencia')
         .select('*')
         .gte('fecha', firstDayOfMonth);
+      if (ctxMateria) histQuery = histQuery.eq('materia', ctxMateria);
+
+      const { data: historialData, error: historialError } = await histQuery;
 
       if (historialError) throw historialError;
 
@@ -79,12 +95,14 @@ export default function AsistenciaPage() {
     const tardanza = tipo === 'T';
 
     try {
-      const { data: existente } = await supabase
+      let queryExistente = supabase
         .from('asistencia')
         .select('id')
         .eq('alumno_id', alumnoId)
-        .eq('fecha', fechaFiltro)
-        .maybeSingle();
+        .eq('fecha', fechaFiltro);
+      if (ctxMateria) queryExistente = queryExistente.eq('materia', ctxMateria);
+      
+      const { data: existente } = await queryExistente.maybeSingle();
         
       if (existente) {
         const { error } = await supabase.from('asistencia')
@@ -93,7 +111,7 @@ export default function AsistenciaPage() {
         if (error) throw error;
       } else {
         const { error } = await supabase.from('asistencia')
-          .insert([{ alumno_id: alumnoId, fecha: fechaFiltro, presente, tardanza }]);
+          .insert([{ alumno_id: alumnoId, fecha: fechaFiltro, presente, tardanza, materia: ctxMateria }]);
         if (error) throw error;
       }
       
@@ -116,6 +134,9 @@ export default function AsistenciaPage() {
 
   const cursosUnicos = Array.from(new Set(alumnos.map((a) => a.curso)));
   const alumnosFiltrados = cursoFiltro === 'Todos' ? alumnos : alumnos.filter((a) => a.curso === cursoFiltro);
+
+  if (!isReady) return null;
+  if (!ctxEscuela || !ctxCurso || !ctxDivision || !ctxMateria) return <LockScreen />;
 
   return (
     <div className="p-4 md:p-8 max-w-5xl mx-auto font-sans bg-gray-50 min-h-screen">

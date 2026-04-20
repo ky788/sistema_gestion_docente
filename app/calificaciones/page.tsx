@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/app/lib/supabase';
+import { useAppContext } from '@/app/context/AppContext';
+import LockScreen from '@/app/ui/LockScreen';
 
 const TRIMESTRES = [
   { id: 1, nombre: '1er Trimestre', meses: ['Marzo', 'Abril', 'Mayo'], valores: ['2026-03-01', '2026-04-01', '2026-05-01'] },
@@ -10,6 +12,7 @@ const TRIMESTRES = [
 ];
 
 export default function CalificacionesPage() {
+  const { escuela: ctxEscuela, curso: ctxCurso, division: ctxDivision, materia: ctxMateria, isReady } = useAppContext();
   const [alumnos, setAlumnos] = useState<any[]>([]);
   const [notasTrimestre, setNotasTrimestre] = useState<Record<string, Record<string, number | null>>>({});
   const [loading, setLoading] = useState(true);
@@ -18,24 +21,35 @@ export default function CalificacionesPage() {
   const [isUpdating, setIsUpdating] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!isReady || !ctxEscuela || !ctxCurso || !ctxDivision || !ctxMateria) return;
     fetchData();
-  }, [trimestreActivo]);
+  }, [trimestreActivo, ctxEscuela, ctxCurso, ctxDivision, ctxMateria, isReady]);
 
   async function fetchData() {
     try {
       setLoading(true);
-      const { data: alumnosData, error: alumnosError } = await supabase
-        .from('alumnos')
+      setAlumnos([]);
+      setNotasTrimestre({});
+      
+      let query = supabase.from('alumnos')
         .select('*')
-        .order('apellido', { ascending: true });
+        .eq('escuela', ctxEscuela)
+        .eq('curso', ctxCurso)
+        .eq('division', ctxDivision);
+      
+      const { data: alumnosData, error: alumnosError } = await query.order('apellido', { ascending: true });
 
       if (alumnosError) throw alumnosError;
 
       const periodo = TRIMESTRES.find(t => t.id === trimestreActivo);
-      const { data: tpData, error: tpError } = await supabase
+      
+      let tpQuery = supabase
         .from('trabajos_practicos')
         .select('alumno_id, mes, evaluaciones')
         .in('mes', periodo?.valores || []);
+      if (ctxMateria) tpQuery = tpQuery.eq('materia', ctxMateria);
+      
+      const { data: tpData, error: tpError } = await tpQuery;
 
       if (tpError) throw tpError;
 
@@ -65,12 +79,14 @@ export default function CalificacionesPage() {
       setIsUpdating(`${alumnoId}-${mes}`);
       
       // Obtener el registro actual para no pisar otras evaluaciones (JSONB)
-      const { data: currentRecord } = await supabase
+      let currentQuery = supabase
         .from('trabajos_practicos')
         .select('evaluaciones')
         .eq('alumno_id', alumnoId)
-        .eq('mes', mes)
-        .maybeSingle();
+        .eq('mes', mes);
+      if (ctxMateria) currentQuery = currentQuery.eq('materia', ctxMateria);
+      
+      const { data: currentRecord } = await currentQuery.maybeSingle();
 
       const nuevasEval = { ...(currentRecord?.evaluaciones || {}), nota_final_mes: num };
 
@@ -79,8 +95,9 @@ export default function CalificacionesPage() {
         .upsert({ 
           alumno_id: alumnoId, 
           mes: mes, 
+          materia: ctxMateria,
           evaluaciones: nuevasEval 
-        }, { onConflict: 'alumno_id, mes' });
+        }, { onConflict: 'alumno_id, mes, materia' });
 
       if (error) throw error;
 
@@ -115,6 +132,9 @@ export default function CalificacionesPage() {
 
   const cursosUnicos = Array.from(new Set(alumnos.map((a) => a.curso)));
   const alumnosFiltrados = cursoFiltro === 'Todos' ? alumnos : alumnos.filter((a) => a.curso === cursoFiltro);
+
+  if (!isReady) return null;
+  if (!ctxEscuela || !ctxMateria) return <LockScreen />;
 
   return (
     <div className="p-4 md:p-8 max-w-6xl mx-auto font-sans bg-gray-50 min-h-screen">

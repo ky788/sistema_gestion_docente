@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/app/lib/supabase';
+import { useAppContext } from '@/app/context/AppContext';
+import LockScreen from '@/app/ui/LockScreen';
 
 const MESES = [
   { nombre: 'Marzo', valor: '2026-03-01' },
@@ -24,6 +26,7 @@ const SEMANAS = [
 ];
 
 export default function TrabajosPage() {
+  const { escuela: ctxEscuela, curso: ctxCurso, division: ctxDivision, materia: ctxMateria, isReady } = useAppContext();
   const [alumnos, setAlumnos] = useState<any[]>([]);
   const [calificaciones, setCalificaciones] = useState<any[]>([]);
   const [asistenciasMes, setAsistenciasMes] = useState<Record<string, number>>({});
@@ -41,33 +44,47 @@ export default function TrabajosPage() {
   }, []);
 
   useEffect(() => {
+    if (!isReady || !ctxEscuela || !ctxCurso || !ctxDivision || !ctxMateria) return;
     fetchData();
-  }, [mesSeleccionado]);
+  }, [mesSeleccionado, ctxEscuela, ctxCurso, ctxDivision, ctxMateria, isReady]);
 
   async function fetchData() {
     try {
       setLoading(true);
-      const { data: alumnosData, error: alumnosError } = await supabase
-        .from('alumnos')
+      setAlumnos([]);
+      setCalificaciones([]);
+      
+      let query = supabase.from('alumnos')
         .select('*')
-        .order('apellido', { ascending: true });
+        .eq('escuela', ctxEscuela)
+        .eq('curso', ctxCurso)
+        .eq('division', ctxDivision);
+      
+      const { data: alumnosData, error: alumnosError } = await query.order('apellido', { ascending: true });
 
       if (alumnosError) throw alumnosError;
       setAlumnos(alumnosData || []);
 
-      const { data: calData } = await supabase
+      let calQuery = supabase
         .from('trabajos_practicos')
         .select('*')
         .eq('mes', mesSeleccionado);
+      if (ctxMateria) calQuery = calQuery.eq('materia', ctxMateria);
+      const { data: calData } = await calQuery;
+      
       setCalificaciones(calData || []);
 
       const fechaFin = new Date(new Date(mesSeleccionado).setMonth(new Date(mesSeleccionado).getMonth() + 1)).toISOString().split('T')[0];
-      const { data: asisData } = await supabase
+      
+      let asisQuery = supabase
         .from('asistencia')
         .select('alumno_id')
         .gte('fecha', mesSeleccionado)
         .lt('fecha', fechaFin)
         .eq('presente', false);
+      if (ctxMateria) asisQuery = asisQuery.eq('materia', ctxMateria);
+      
+      const { data: asisData } = await asisQuery;
       
       const conteoAsis: Record<string, number> = {};
       asisData?.forEach(a => {
@@ -85,10 +102,10 @@ export default function TrabajosPage() {
   async function handleSaveRow(alumnoId: string) {
     const registroExisting = calificaciones.find(c => c.alumno_id === alumnoId && c.mes === mesSeleccionado);
     
-    // El objeto que vamos a guardar
     const payload = {
       alumno_id: alumnoId,
       mes: mesSeleccionado,
+      materia: ctxMateria,
       evaluaciones: registroExisting?.evaluaciones || {}
     };
 
@@ -96,7 +113,7 @@ export default function TrabajosPage() {
       setIsSaving(alumnoId);
       const { data, error } = await supabase
         .from('trabajos_practicos')
-        .upsert(payload, { onConflict: 'alumno_id, mes' })
+        .upsert(payload, { onConflict: 'alumno_id, mes, materia' })
         .select();
 
       if (error) throw error;
@@ -194,6 +211,9 @@ export default function TrabajosPage() {
 
   const cursosUnicos = Array.from(new Set(alumnos.map((a) => a.curso)));
   const alumnosFiltrados = cursoFiltro === 'Todos' ? alumnos : alumnos.filter((a) => a.curso === cursoFiltro);
+
+  if (!isReady) return null;
+  if (!ctxEscuela || !ctxMateria) return <LockScreen />;
 
   return (
     <div className="p-4 md:p-8 max-w-[1400px] mx-auto font-sans">
